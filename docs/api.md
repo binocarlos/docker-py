@@ -220,6 +220,7 @@ from. Optionally a single string joining container id's with commas
 * mac_address (str): The Mac Address to assign the container
 * labels (dict or list): A dictionary of name-value labels (e.g. `{"label1": "value1", "label2": "value2"}`) or a list of names of labels to set with empty values (e.g. `["label1", "label2"]`)
 * volume_driver (str): The name of a volume driver/plugin.
+* publish_service (str): A composite string describing a network service to publish (e.g. `docker run --publish-service=SERVICE[.NETWORK][.DRIVER]`)
 
 **Returns** (dict): A dictionary with an image 'Id' key and a 'Warnings' key.
 
