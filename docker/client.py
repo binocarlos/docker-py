@@ -23,6 +23,8 @@ from datetime import datetime
 import requests
 import requests.exceptions
 import six
+import websocket
+
 
 from . import constants
 from . import errors
@@ -31,10 +33,6 @@ from .unixconn import unixconn
 from .ssladapter import ssladapter
 from .utils import utils, check_resource
 from .tls import TLSConfig
-
-
-if not six.PY3:
-    import websocket
 
 
 class Client(requests.Session):
@@ -154,9 +152,6 @@ class Client(requests.Session):
 
     @check_resource
     def _attach_websocket(self, container, params=None):
-        if six.PY3:
-            raise NotImplementedError("This method is not currently supported "
-                                      "under python 3")
         url = self._url("/containers/{0}/attach/ws".format(container))
         req = requests.Request("POST", url, params=self._attach_params(params))
         full_url = req.prepare().url
@@ -306,8 +301,9 @@ class Client(requests.Session):
 
     def build(self, path=None, tag=None, quiet=False, fileobj=None,
               nocache=False, rm=False, stream=False, timeout=None,
-              custom_context=False, encoding=None, pull=True,
-              forcerm=False, dockerfile=None, container_limits=None):
+              custom_context=False, encoding=None, pull=False,
+              forcerm=False, dockerfile=None, container_limits=None,
+              decode=False):
         remote = context = headers = None
         container_limits = container_limits or {}
         if path is None and fileobj is None:
@@ -351,6 +347,9 @@ class Client(requests.Session):
             raise errors.InvalidVersion(
                 'dockerfile was only introduced in API version 1.17'
             )
+
+        if utils.compare_version('1.19', self._version) < 0:
+            pull = 1 if pull else 0
 
         u = self._url('/build')
         params = {
@@ -398,7 +397,7 @@ class Client(requests.Session):
             context.close()
 
         if stream:
-            return self._stream_helper(response)
+            return self._stream_helper(response, decode=decode)
         else:
             output = self._result(response)
             srch = r'Successfully built ([0-9a-f]+)'
@@ -912,13 +911,17 @@ class Client(requests.Session):
             else:
                 headers['X-Registry-Auth'] = auth.encode_header(auth_config)
 
-        response = self._post(self._url('/images/create'), params=params,
-                              headers=headers, stream=stream, timeout=None)
+        response = self._post(
+            self._url('/images/create'), params=params, headers=headers,
+            stream=stream, timeout=None
+        )
+
+        self._raise_for_status(response)
 
         if stream:
             return self._stream_helper(response)
-        else:
-            return self._result(response)
+
+        return self._result(response)
 
     def push(self, repository, tag=None, stream=False,
              insecure_registry=False):
@@ -946,13 +949,16 @@ class Client(requests.Session):
             if authcfg:
                 headers['X-Registry-Auth'] = auth.encode_header(authcfg)
 
-            response = self._post_json(u, None, headers=headers,
-                                       stream=stream, params=params)
-        else:
-            response = self._post_json(u, None, stream=stream, params=params)
+        response = self._post_json(
+            u, None, headers=headers, stream=stream, params=params
+        )
 
-        return stream and self._stream_helper(response) \
-            or self._result(response)
+        self._raise_for_status(response)
+
+        if stream:
+            return self._stream_helper(response)
+
+        return self._result(response)
 
     @check_resource
     def remove_container(self, container, v=False, link=False, force=False):

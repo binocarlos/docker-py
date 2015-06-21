@@ -120,16 +120,21 @@ def compare_version(v1, v2):
 
 
 def ping_registry(url):
-    return ping(url + '/v2/') or ping(url + '/v1/_ping')
+    return ping(url + '/v2/', [401]) or ping(url + '/v1/_ping')
 
 
-def ping(url):
+def ping(url, valid_4xx_statuses=None):
     try:
         res = requests.get(url, timeout=3)
     except Exception:
         return False
     else:
-        return res.status_code < 400
+        # We don't send yet auth headers
+        # and a v2 registry will respond with status 401
+        return (
+            res.status_code < 400 or
+            (valid_4xx_statuses and res.status_code in valid_4xx_statuses)
+        )
 
 
 def _convert_port_binding(binding):
@@ -174,11 +179,27 @@ def convert_port_bindings(port_bindings):
 
 
 def convert_volume_binds(binds):
+    if isinstance(binds, list):
+        return binds
+
     result = []
     for k, v in binds.items():
         if isinstance(v, dict):
+            if 'ro' in v and 'mode' in v:
+                raise ValueError(
+                    'Binding cannot contain both "ro" and "mode": {}'
+                    .format(repr(v))
+                )
+
+            if 'ro' in v:
+                mode = 'ro' if v['ro'] else 'rw'
+            elif 'mode' in v:
+                mode = v['mode']
+            else:
+                mode = 'rw'
+
             result.append('{0}:{1}:{2}'.format(
-                k, v['bind'], 'ro' if v.get('ro', False) else 'rw'
+                k, v['bind'], mode
             ))
         else:
             result.append('{0}:{1}:rw'.format(k, v))
@@ -434,7 +455,7 @@ def create_host_config(
                 for k, v in sorted(six.iteritems(extra_hosts))
             ]
 
-            host_config['ExtraHosts'] = extra_hosts
+        host_config['ExtraHosts'] = extra_hosts
 
     if links is not None:
         if isinstance(links, dict):
@@ -497,8 +518,13 @@ def create_container_config(
         ]
 
     if labels is not None and compare_version('1.18', version) < 0:
-        raise errors.DockerException(
+        raise errors.InvalidVersion(
             'labels were only introduced in API version 1.18'
+        )
+
+    if volume_driver is not None and compare_version('1.19', version) < 0:
+        raise errors.InvalidVersion(
+            'Volume drivers were only introduced in API version 1.19'
         )
 
     if isinstance(labels, list):
@@ -554,9 +580,9 @@ def create_container_config(
         message = ('{0!r} parameter has no effect on create_container().'
                    ' It has been moved to start()')
         if dns is not None:
-            raise errors.DockerException(message.format('dns'))
+            raise errors.InvalidVersion(message.format('dns'))
         if volumes_from is not None:
-            raise errors.DockerException(message.format('volumes_from'))
+            raise errors.InvalidVersion(message.format('volumes_from'))
 
     return {
         'Hostname': hostname,
