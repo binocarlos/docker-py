@@ -522,10 +522,15 @@ def create_container_config(
             'labels were only introduced in API version 1.18'
         )
 
-    if volume_driver is not None and compare_version('1.19', version) < 0:
-        raise errors.InvalidVersion(
-            'Volume drivers were only introduced in API version 1.19'
-        )
+    # XXX Our patched version of swarm tries to speak 1.18 *with*
+    # PublishService and VolumeDriver. This is an expedient hack which should
+    # be resolved by fixing swarm. See
+    # https://github.com/ClusterHQ/docker-plugins-demo/issues/21
+
+    #if volume_driver is not None and compare_version('1.19', version) < 0:
+    #    raise errors.InvalidVersion(
+    #        'Volume drivers were only introduced in API version 1.19'
+    #    )
 
     if isinstance(labels, list):
         labels = dict((lbl, six.text_type('')) for lbl in labels)
